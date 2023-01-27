@@ -1,13 +1,15 @@
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
 from keras.models import load_model
 import speech_recognition as sr
 import customtkinter as ctk
 import tensorflow as tf
 from PIL import Image
 from gtts import gTTS
-import numpy as np
 import pandas as pd
-import pygame
+import numpy as np
 import random
+import pygame
 import cv2
 import os
 
@@ -60,16 +62,33 @@ class App(ctk.CTk):
         self.micButton = ctk.CTkButton(self.rframe, text="", image=micPhoto, command=self.mic, fg_color="transparent")
         self.micButton.grid(row=0, column=0, padx=(20, 20), pady=(20, 20))
 
-
         # CAM Button
         self.camButton = ctk.CTkButton(self.rframe, text="", image=camPhoto, command=self.cam, fg_color="transparent")
 
-        # Text Label
-        self.textLabel = ctk.CTkLabel(master=self.rframe, text="Click on the Mic Buttone and Speak", font=ctk.CTkFont(size=14, weight="bold"), anchor="e")
-        self.textLabel.grid(row=0, column=2, padx=(20, 0), pady=(20, 0), sticky="nsew")
+        # Browse Button
+        self.browseButton = ctk.CTkButton(self.rframe, text="Browse", command=self.browse)
 
-        # Images Label
-        self.imageLabel = ctk.CTkLabel(master=self.rframe, text="Images will appear here")
+        # File Path Entry
+        self.fileEntry = ctk.CTkEntry(self.rframe, placeholder_text="File Path")
+
+        # Text Label
+        self.textLabel = ctk.CTkLabel(master=self.rframe, text="Click on the Mic Button and Speak", font=ctk.CTkFont(size=18, weight="bold"), anchor="e")
+        self.textLabel.grid(row=0, column=2, padx=(20, 0), pady=(20, 0), sticky="nsew")
+        
+        # Inner Frame
+        self.inframe = ctk.CTkFrame(master=self.rframe, corner_radius=0)
+        self.inframe.grid(row=1, column=0, sticky="nsew")
+
+        # Images Canvas
+        self.imgCanvas = ctk.CTkCanvas(master=self.inframe)
+        self.imgCanvas.grid(row=1, column=0, sticky="nsew")
+
+        # Scroll Window
+        self.vscroll = ctk.CTkScrollbar(master=self.inframe, command=self.imgCanvas.yview)
+        self.vscroll.grid(row=1, column=4, sticky="ns")
+
+        # Configuration
+        self.imgCanvas.configure(yscrollcommand=self.vscroll.set)
 
         # Play Button
         self.playButton = ctk.CTkButton(self.rframe, text="", image=playPhoto, command=self.play_audio, fg_color="white")
@@ -85,24 +104,64 @@ class App(ctk.CTk):
     
         if input_mode == "Microphone":
             self.camButton.grid_forget()
+            self.browseButton.grid_forget()
+            self.fileEntry.grid_forget()
             self.playButton.grid_forget()
-            self.textLabel.configure(text="")
+            self.textLabel.configure(text="Click on the Mic Button and Speak")
+            self.inframe.grid(row=1, column=0, rowspan=3, columnspan=4, sticky="nsew")
             self.micButton.grid(row=0, column=0, padx=(20, 20), pady=(20, 20))
         else:
             self.micButton.grid_forget()
             self.textLabel.configure(text="")
-            self.imageLabel.grid_forget()
+            self.inframe.grid_forget()
             self.camButton.grid(row=0, column=0, padx=(20, 20), pady=(20, 20))
+            self.browseButton.grid(row=1, column=2, padx=(20, 20), pady=(20, 20))
+            self.fileEntry.grid(row=1, column=0, columnspan=2, padx=(20, 20), pady=(20, 20), sticky="nsew")
+
+
+    def browse(self):  # Open Image Files
+        tf = ctk.filedialog.askopenfilenames(
+            initialdir=r".\data\\Test",
+            title="Select Images",
+            filetypes=(("All Files", "*.*"), ("Images", "*.png *.jpg *.jpeg *.PNG *.JPG *.JPEG", ))
+            )
+        self.fileEntry.insert(ctk.END, tf)
+        # read_file(tf)
+        self.img_speech(list(tf))
     
+    imgs = []
+
+    def img_speech(self, fp):
+        # Loading the Model
+        ArSL_model = load_model('models/ArSLText.h5')
+
+        for name in fp:
+            img = cv2.imread(name)
+            # self.imgs.append(img)
+            resize = tf.image.resize(img, (256, 256))
+            np.expand_dims(resize, 0)
+            yhat = ArSL_model.predict(np.expand_dims(resize/255, 0))
+            result = np.where(yhat[0] == np.amax(yhat[0]))
+
+            letter = self.guide[self.guide["Index"] == result[0][0]]["Arabic_Letters"].iloc[0]
+
+            self.string += letter
+        
+        self.textLabel.configure(text=self.string)
+        self.text_speech(self.string)  # Convert Text to Speech/Audio
+        self.playButton.grid(row=4, column=0, padx=(20, 20), pady=(20, 20))
+
+
+
     def image_list(self):
         for cla in os.listdir(self.imgdir):
             p = self.imgdir + '\\' + cla
             imgName = random.choice(os.listdir(p))
             imPath = p + '\\' + imgName
-            # image = cv2.imread(imPath)
-            # self.ArSL.append(image)
-            self.ArSL.append(imPath)
+            image = cv2.imread(imPath)
+            self.ArSL.append(image)
 
+    label = ""
 
     def mic(self): # Microphone Input
         r = sr.Recognizer()
@@ -118,7 +177,6 @@ class App(ctk.CTk):
                 text = r.recognize_google(audio, language='ar-EG')
 
                 self.label = self.label + "\n" + text + " :لقد قلت"
-                self.imageLabel.grid(row=1, column=0, padx=(20, 0), pady=(20, 0), sticky="nsew")
                 self.speect_text_image(text)
 
             except Exception as e:
@@ -147,38 +205,37 @@ class App(ctk.CTk):
         
         # Displaying the Images
         for l1 in encoded:
-            # l1.reverse()
+            self.fig = Figure(figsize=(15,3), frameon=False)
+            l1.reverse()
+            self.ax = self.fig.subplots(1, len(l1))
             for i in range(len(l1)):
-                self.imageLabel.configure(text="")
-                self.display_images(self.ArSL[l1[i]])
-    
-    # photos = []
-
-    def display_images(self, img):
-
-        image = Image.open(img)
-        photo = ctk.CTkImage(dark_image=image, size=(80, 80))
-        # self.photos.append(photo)  # keep references!
-        newPhoto_label = ctk.CTkLabel(master=self.imageLabel, text="", image=photo)
-        newPhoto_label.grid()
+                self.ax[i].imshow(self.ArSL[l1[i]], cmap='gray')
+                self.ax[i].set_title(self.guide[self.guide['Index'] == l1[i]]['Arabic_Letters'].iloc[0])
+                self.ax[i].tick_params(left = False, right = False , labelleft = False , labelbottom = False, bottom = False)
+            
+            self.canvas = FigureCanvasTkAgg(self.fig, master=self.imgCanvas)
+            self.canvas.draw()
+            self.canvas.get_tk_widget().grid(sticky="nsew")
 
     string = ""
 
     def cam(self):  # Camera Input
-        self.imageLabel.grid_forget()
+        # self.imageLabel.grid_forget()
         
         source = cv2.VideoCapture(0)
         color_dict = (0,255,0)
         count = 0
         prev_val = 0
         letter = ""
+        self.string = ""
 
         ArSL_model = load_model('models/best_model')
 
         while(True):
             ret, img = source.read()
             cv2.rectangle(img, (24,24), (350 , 350), color_dict, 2)
-            crop_img = img[24:350,24:350]
+            bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            crop_img = bgr[24:350,24:350]
             
             count += 1
             if (count % 100 == 0):
